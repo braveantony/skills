@@ -72,6 +72,31 @@ kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint get <id>
 
 **指令名稱**：`cilium-dbg` 是 agent 內的除錯 CLI。較舊的版本沒有這個名稱，出現 command not found 時把 `cilium-dbg` 換成 `cilium` 再試。
 
+**jsonpath 仍然沒輸出時**：用 Pod 內網卡的 peer index 對應。Pod 內 `ip -o link show eth0` 會顯示 `eth0@ifN`，N 就是主機端網卡的 index；在節點上 `ip -o link | grep "^N:"` 找到名稱。
+
+### 經過 Gateway／Ingress（Envoy）時
+
+這類路徑常被誤畫成一條線。先確認 proxy 是否終止連線，再決定畫一條還是兩條 path。全部是觀察指令：
+
+| 要確認的事 | 做法 |
+|---|---|
+| Gateway IP 由哪個節點回應 | 在用戶端 `ip neigh` 看該 IP 的 MAC，對應到節點 eth0 的 MAC；L2 宣告可查 `kubectl -n kube-system get lease \| grep l2announce` |
+| Gateway IP 被轉到哪 | 在該節點的 cilium Pod 內 `cilium-dbg service list \| grep <Gateway IP>`，後端是 `127.0.0.1:<port>` 代表交給本機 Envoy |
+| Envoy 是否 hostNetwork | `kubectl -n kube-system get ds cilium-envoy -o jsonpath='{.spec.template.spec.hostNetwork}'` |
+| 是不是兩條 TCP 連線 | 連線進行中，在該節點 `ss -tnp \| grep envoy`，同時看到「用戶端 → Gateway IP:80」與「ingress IP → Pod IP:port」兩個 socket 就是兩條 |
+| 封包經過哪些網卡 | 在各節點與 Pod netns 用 `tcpdump -nn -e -i <if> host <ip>` 各抓幾秒；Pod netns 用 `crictl inspect` 取 PID 再 `nsenter -t <PID> -n` |
+
+### 會變動的值
+
+抓資料時順便記下哪些值每次都不同，寫進 spec 的 `volatile`：
+
+- 行程 PID（例如 cilium-envoy）：重啟就變
+- Pod 名稱的雜湊、Pod IP、主機端 lxc 名稱：Pod 重建就變
+- ingress IP、CiliumInternalIP：節點或 agent 重啟後可能重新分配
+- 用戶端來源埠、proxy 另開連線的來源埠：每條連線都不同
+
+節點 IP、Gateway IP（LB IP pool 指派）、node 的 Pod CIDR、Service 埠通常是固定的。拿不準時隔一次重啟再查一次比對。
+
 ### 其他 CNI
 
 在節點上用 `ip -br link` 看 veth，再以 Pod 內 `eth0` 的 peer index 對應主機端網卡。查不出來就留空，不要猜名稱。

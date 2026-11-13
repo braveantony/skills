@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 720" role="img" aria-labelledby="t d">
+<title id="t">看板連線怎麼走：主機 → 入口（Envoy）→ koupa Pod</title>
+<desc id="d">主機的瀏覽器經 podman2 bridge 連到 tkha-control-plane-2 上的 cilium-envoy（連線 ①）；Envoy 另開連線 ② 經同一座 bridge 到 tkha-worker-2 上的 koupa Pod，不經過 lxc 網卡。右側依序列出步驟 1 到 7。</desc>
+<defs><style>
+text { font-family: Calibri, Carlito, "Segoe UI", Arial, "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; fill: #383a42; }
+.frame { fill: none; stroke: #696c77; stroke-width: 2; }
+.box { fill: #f0f0f1; stroke: #696c77; stroke-width: 1.5; }
+.env { fill: #f0f0f1; stroke: #232324; stroke-width: 2; }
+.ln { fill: none; stroke: #696c77; stroke-width: 1.5; }
+.ttl { font-size: 22px; font-weight: 700; fill: #232324; dominant-baseline: central; }
+.nn { font-size: 20px; font-weight: 700; fill: #232324; dominant-baseline: central; }
+.lbl { font-size: 20px; text-anchor: middle; dominant-baseline: central; fill: #232324; }
+.sm { font-size: 18px; text-anchor: middle; dominant-baseline: central; }
+.tag { font-size: 15px; text-anchor: middle; dominant-baseline: central; }
+.xip { font-size: 17px; dominant-baseline: central; }
+.ip { font-size: 20px; font-weight: 700; dominant-baseline: central; fill: #232324; }
+.num { font-size: 16px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.nc { fill: #ffffff; stroke-width: 2.5; }
+.pr { stroke: #a626a4; } .gr { stroke: #50a14f; }
+.pn { fill: #a626a4; } .gn { fill: #3f8f3e; }
+.pp { fill: none; stroke: #a626a4; stroke-width: 3; stroke-dasharray: 8 6; }
+.gp { fill: none; stroke: #50a14f; stroke-width: 3; stroke-dasharray: 8 6; }
+.off { fill: none; stroke: #a0a1a7; stroke-width: 1.5; stroke-dasharray: 5 4; }
+.mt { fill: #8a8b92; }
+.br { fill: #e5e5e6; stroke: #696c77; stroke-width: 1.5; }
+.side { fill: #ffffff; stroke: #d4d4d8; stroke-width: 1; }
+.sh { font-size: 18px; font-weight: 700; fill: #232324; dominant-baseline: central; }
+.lg { font-size: 15px; dominant-baseline: central; }
+.s1 { font-size: 17px; font-weight: 700; fill: #232324; dominant-baseline: central; }
+.s2 { font-size: 16px; fill: #50525c; dominant-baseline: central; }
+.sep { stroke: #e2e2e5; stroke-width: 1; }
+.chip { fill: #e1e1e5; }
+.fn { font-size: 15px; fill: #50525c; dominant-baseline: central; }
+</style>
+<marker id="ap" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#a626a4"></path></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#50a14f"></path></marker>
+</defs>
+<rect width="1440" height="720" fill="#fafafa"></rect>
+<text x="20" y="28" class="ttl">看板連線怎麼走：主機 → 入口（Envoy）→ koupa Pod</text>
+
+<!-- node frames -->
+<rect class="frame" x="20" y="52" width="430" height="418"></rect>
+<rect class="frame" x="480" y="52" width="420" height="418"></rect>
+<text x="36" y="78" class="nn">tkha-control-plane-2</text>
+<text x="496" y="78" class="nn">tkha-worker-2</text>
+<text x="36" y="108" class="xip">172.22.0.201（Gateway IP，L2 宣告）</text>
+<rect class="chip" x="36.4" y="123.4" width="105.3" height="21.1" rx="4"></rect><text x="36" y="134" class="xip"> <tspan class="v">10.244.1.237</tspan> （ingress IP）</text>
+
+<!-- bridge + attachments -->
+<line class="ln" x1="340" y1="444" x2="340" y2="540"></line>
+<line class="ln" x1="760" y1="444" x2="760" y2="540"></line>
+<rect class="br" x="230" y="540" width="670" height="40" rx="6"></rect>
+<text x="565" y="560" class="sm" style="fill:#232324">podman2 bridge 172.22.0.0/24（主機 172.22.0.254）</text>
+
+<!-- client -->
+<rect class="box" x="20" y="520" width="180" height="80"></rect>
+<text x="110" y="546" class="lbl" style="font-size:18px">主機的瀏覽器／curl</text>
+<text x="110" y="576" class="tag">172.22.0.254 · podman2</text>
+
+<!-- control-plane-2 -->
+<rect class="env" x="250" y="180" width="180" height="70"></rect>
+<text x="340" y="203" class="lbl">cilium-envoy</text>
+<rect class="chip" x="384.9" y="220.6" width="31.7" height="18.9" rx="4"></rect><text x="340" y="230" class="tag">hostNetwork · pid  <tspan class="v">564</tspan> </text>
+<rect class="box" x="260" y="400" width="160" height="44"></rect>
+<text x="340" y="422" class="lbl">eth0</text>
+<text x="250" y="422" class="ip" text-anchor="end">172.22.0.2</text>
+
+<!-- worker-2 -->
+<rect class="box" x="670" y="90" width="210" height="104"></rect>
+<rect class="chip" x="683.2" y="97.4" width="184.6" height="21.1" rx="4"></rect><text x="775" y="108" class="sm" style="font-size:17px"> <tspan class="v">koupa-7f64658cd-tb9wt</tspan> </text>
+<rect class="box" x="700" y="124" width="150" height="60" style="fill:#ffffff"></rect>
+<rect class="chip" x="719.5" y="132.4" width="111.2" height="21.1" rx="4"></rect><text x="775" y="143" class="sm"> <tspan class="v">10.244.4.230</tspan> </text>
+<text x="775" y="166" class="sm">eth0</text>
+<line class="ln" x1="830" y1="194" x2="830" y2="250"></line>
+<rect class="off" x="754" y="250" width="142" height="46"></rect>
+<rect class="chip" x="770.7" y="263.6" width="118.6" height="18.9" rx="4"></rect><text x="830" y="273" class="tag mt"> <tspan class="v">lxcc16555cb6fee</tspan> </text>
+<text x="830" y="314" class="tag mt">連線 ② 不經過</text>
+<rect class="box" x="680" y="400" width="160" height="44"></rect>
+<text x="760" y="422" class="lbl">eth0</text>
+<text x="670" y="422" class="ip" text-anchor="end">172.22.0.5</text>
+
+<!-- connection 1 (purple) -->
+<path class="pp" d="M200 560 H223" marker-end="url(#ap)"></path>
+<path class="pp" d="M300 540 V451" marker-end="url(#ap)"></path>
+<path class="pp" d="M300 400 V257" marker-end="url(#ap)"></path>
+<!-- connection 2 (green) -->
+<path class="gp" d="M380 250 V393" marker-end="url(#ag)"></path>
+<path class="gp" d="M380 444 V505 H720 V451" marker-end="url(#ag)"></path>
+<path class="gp" d="M720 400 V201" marker-end="url(#ag)"></path>
+
+<circle class="nc pr" cx="110" cy="498" r="14"></circle><text x="110" y="498" class="num pn">1</text>
+<circle class="nc pr" cx="560" cy="604" r="14"></circle><text x="560" y="604" class="num pn">2</text>
+<circle class="nc pr" cx="276" cy="372" r="14"></circle><text x="276" y="372" class="num pn">3</text>
+<circle class="nc pr" cx="226" cy="215" r="14"></circle><text x="226" y="215" class="num pn">4</text>
+<circle class="nc gr" cx="406" cy="300" r="14"></circle><text x="406" y="300" class="num gn">5</text>
+<circle class="nc gr" cx="862" cy="422" r="14"></circle><text x="862" y="422" class="num gn">6</text>
+<circle class="nc gr" cx="648" cy="140" r="14"></circle><text x="648" y="140" class="num gn">7</text>
+<rect class="side" x="930" y="52" width="490" height="648" rx="8"></rect>
+<text x="954" y="80" class="sh">步驟</text>
+<path class="pp" d="M1040 80 H1076"></path><text x="1084" y="80" class="lg">連線 ①：瀏覽器 ↔ Envoy</text>
+<path class="gp" d="M1040 106 H1076"></path><text x="1084" y="106" class="lg">連線 ②：Envoy ↔ Pod</text>
+<line class="sep" x1="946" y1="126" x2="1404" y2="126"></line>
+<circle class="nc pr" cx="968" cy="156" r="14"></circle><text x="968" y="156" class="num pn">1</text>
+<text x="996" y="156" class="s1">curl http://172.22.0.201/events</text>
+<text x="996" y="182" class="s2">172.22.0.254:45123 → 172.22.0.201:80</text>
+<line class="sep" x1="946" y1="196" x2="1404" y2="196"></line>
+<circle class="nc pr" cx="968" cy="226" r="14"></circle><text x="968" y="226" class="num pn">2</text>
+<text x="996" y="226" class="s1">誰有 172.22.0.201？</text>
+<text x="996" y="252" class="s2">control-plane-2 回 ARP（L2 宣告）</text>
+<line class="sep" x1="946" y1="266" x2="1404" y2="266"></line>
+<circle class="nc pr" cx="968" cy="296" r="14"></circle><text x="968" y="296" class="num pn">3</text>
+<text x="996" y="296" class="s1">eBPF 把封包直接交給 Envoy</text>
+<text x="996" y="322" class="s2">（目的地址不改，lo 上抓不到）</text>
+<line class="sep" x1="946" y1="336" x2="1404" y2="336"></line>
+<circle class="nc pr" cx="968" cy="366" r="14"></circle><text x="968" y="366" class="num pn">4</text>
+<text x="996" y="366" class="s1">連線 ① 在這裡結束</text>
+<text x="996" y="392" class="s2">閒置 300 秒切斷、入口紀錄都在這裡</text>
+<line class="sep" x1="946" y1="406" x2="1404" y2="406"></line>
+<circle class="nc gr" cx="968" cy="436" r="14"></circle><text x="968" y="436" class="num gn">5</text>
+<text x="996" y="436" class="s1">Envoy 另開連線 ②</text>
+<text x="996" y="462" class="s2">10.244.1.237:38767 → 10.244.4.230:8080</text>
+<line class="sep" x1="946" y1="476" x2="1404" y2="476"></line>
+<circle class="nc gr" cx="968" cy="506" r="14"></circle><text x="968" y="506" class="num gn">6</text>
+<text x="996" y="506" class="s1">路由 10.244.4.0/24 via 172.22.0.5</text>
+<text x="996" y="532" class="s2">eBPF 直接送進 Pod（不經 lxc）</text>
+<line class="sep" x1="946" y1="546" x2="1404" y2="546"></line>
+<circle class="nc gr" cx="968" cy="576" r="14"></circle><text x="968" y="576" class="num gn">7</text>
+<text x="996" y="576" class="s1">App 在 8080 收到</text>
+<text x="996" y="602" class="s2">看到的來源是 Envoy，不是瀏覽器</text>
+<line class="sep" x1="946" y1="630" x2="1404" y2="630"></line>
+<rect class="chip" x="951.0" y="642.6" width="35.3" height="18.9" rx="4"></rect><text x="954" y="652" class="fn"><tspan class="v">灰底</tspan> 的值會變動：重啟、重建或每條新連線都不同</text>
+<text x="954" y="676" class="fn">圖中是 2026-11-12 tkha 實測，請以自己查到的為準</text>
+</svg>
