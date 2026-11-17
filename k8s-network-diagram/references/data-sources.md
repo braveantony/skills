@@ -16,7 +16,7 @@
 | Pod 名稱、Pod IP、所在節點 | `kubectl get pods -A -o wide` |
 | Service 的 ClusterIP 與 port | `kubectl get svc -A` |
 | 節點上的介面與 IP | 在節點上 `ip -br addr` |
-| bond 與成員網卡 | 在節點上 `ip -br link`，成員的 master 欄位會指向 bond |
+| bond 與成員網卡 | 在節點上 `ip -br link`，成員的 master 欄位會指向 bond。版面沒有畫成員網卡的位置，`uplink.name` 填 bond 名稱（例如 `bond0`）即可 |
 
 範圍大時先縮小：用 `-n <namespace>` 或 `--field-selector spec.nodeName=<node>` 只查要畫的部分。
 
@@ -55,8 +55,10 @@ kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint list \
 jsonpath 沒輸出時，改用 `-o json` 看完整結構再取值：
 
 ```bash
-kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint list -o json
-kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint get <id>
+CILIUM_POD=cilium-xxxxx   # 換成目標節點上的 cilium Pod
+kubectl -n kube-system exec "$CILIUM_POD" -- cilium-dbg endpoint list -o json
+EP_ID=1234                # 換成上面輸出裡的 endpoint ID
+kubectl -n kube-system exec "$CILIUM_POD" -- cilium-dbg endpoint get "$EP_ID"
 ```
 
 沒有對應 Pod 名稱的列（例如 host 與 health endpoint）不是要畫的 Pod，略過即可。
@@ -83,7 +85,7 @@ kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint get <id>
 | Gateway IP 由哪個節點回應 | 在用戶端 `ip neigh` 看該 IP 的 MAC，對應到節點 eth0 的 MAC；L2 宣告可查 `kubectl -n kube-system get lease \| grep l2announce` |
 | Gateway IP 被轉到哪 | 在該節點的 cilium Pod 內 `cilium-dbg service list \| grep <Gateway IP>`，後端是 `127.0.0.1:<port>` 代表交給本機 Envoy |
 | Envoy 是否 hostNetwork | `kubectl -n kube-system get ds cilium-envoy -o jsonpath='{.spec.template.spec.hostNetwork}'` |
-| 是不是兩條 TCP 連線 | 連線進行中，在該節點 `ss -tnp \| grep envoy`，同時看到「用戶端 → Gateway IP:80」與「ingress IP → Pod IP:port」兩個 socket 就是兩條 |
+| 是不是兩條 TCP 連線 | 連線進行中，在該節點 `ss -tnp \| grep envoy`，同時看到「用戶端 → Gateway IP:80」與「Envoy 的來源 IP → Pod IP:port」兩個 socket（這個來源 IP 是 Cilium 的 `reserved:ingress` 位址，`cilium-dbg ip list` 查得到） 就是兩條 |
 | 封包經過哪些網卡 | 在各節點與 Pod netns 用 `tcpdump -nn -e -i <if> host <ip>` 各抓幾秒；Pod netns 用 `crictl inspect` 取 PID 再 `nsenter -t <PID> -n` |
 
 ### 會變動的值
@@ -92,7 +94,7 @@ kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint get <id>
 
 - 行程 PID（例如 cilium-envoy）：重啟就變
 - Pod 名稱的雜湊、Pod IP、主機端 lxc 名稱：Pod 重建就變
-- ingress IP、CiliumInternalIP：節點或 agent 重啟後可能重新分配
+- Envoy 的來源 IP（Cilium `reserved:ingress`）、CiliumInternalIP：節點或 agent 重啟後可能重新分配
 - 用戶端來源埠、proxy 另開連線的來源埠：每條連線都不同
 
 節點 IP、Gateway IP（LB IP pool 指派）、node 的 Pod CIDR、Service 埠通常是固定的。拿不準時隔一次重啟再查一次比對。
@@ -103,13 +105,14 @@ kubectl -n kube-system exec <cilium-pod> -- cilium-dbg endpoint get <id>
 
 ## 3. 詢問使用者
 
-沒有輸出也連不到叢集時，問這幾件事：
+沒有輸出也連不到叢集時，依序問這幾件事，一次只問一題，等回答後再問下一題：
 
-- 要畫幾個節點？
-- 每個節點的上行介面名稱、IP，以及是否為 bond（成員網卡是哪些）？
-- 要畫哪些 Pod（名稱、IP、所在節點）？
-- 要標示哪一條封包路徑，從哪到哪？
-- 每個步驟的標註文字？
+1. 要畫幾個節點？
+2. 每個節點的上行介面名稱？（一個節點問完再問下一個，下同）
+3. 上行介面的 IP？
+4. 要畫哪些 Pod？（每個 Pod 再依序問名稱、IP、所在節點）
+5. 要標示哪一條封包路徑，從哪到哪？
+6. 每個步驟的標註文字？（一步一步問）
 
 ## 查不到時
 
