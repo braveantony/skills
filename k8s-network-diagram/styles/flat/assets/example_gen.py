@@ -1,8 +1,9 @@
 """Example generator: One Light diagram, step numbers on the drawing, step text in a right-hand panel.
 
 Usage: python3 example_gen.py raw.svg
-Then:  node scripts/chips.mjs raw.svg final.svg   (grey chips behind volatile values)
-       node scripts/svg2png.mjs final.svg final.png
+Then run styles/flat/scripts/chips.mjs raw.svg final.svg (grey chips behind volatile values)
+and svg2png.mjs final.svg final.png, via the podman command in styles/flat/layout.md
+("自我檢查"); run locally only after copying them next to node_modules/playwright.
 
 Every value below is an EXAMPLE from one cluster. Replace them all from your spec.yaml;
 also move the coordinates in the SVG template when the nodes/components differ.
@@ -15,14 +16,14 @@ C = dict(bg="#fafafa", panel="#f0f0f1", surface="#e5e5e6", text="#383a42", stron
          muted="#a0a1a7", line="#696c77", p="#a626a4", g="#50a14f", gt="#3f8f3e")
 W, H = 1440, 720
 
-STEPS = [  # (n, conn, line1, line2) — text verbatim from spec.yaml
-    (1, "p", "curl http://172.22.0.201/events", "172.22.0.254:45123 → 172.22.0.201:80"),
+STEPS = [  # (n, conn, line1, line2) — text verbatim from spec.yaml; same text as styles/3d/assets/index.html
+    (1, "p", "curl http://172.22.0.201/events", "172.22.0.254:33144 → 172.22.0.201:80"),
     (2, "p", "誰有 172.22.0.201？", "control-plane-2 回 ARP（L2 宣告）"),
     (3, "p", "eBPF 把封包直接交給 Envoy", "（目的地址不改，lo 上抓不到）"),
-    (4, "p", "連線 ① 在這裡結束", "閒置 300 秒切斷、入口紀錄都在這裡"),
-    (5, "g", "Envoy 另開連線 ②", "10.244.1.237:38767 → 10.244.4.230:8080"),
-    (6, "g", "路由 10.244.4.0/24 via 172.22.0.5", "eBPF 直接送進 Pod（不經 lxc）"),
-    (7, "g", "App 在 8080 收到", "看到的來源是 Envoy，不是瀏覽器"),
+    (4, "p", "連線 ① 在這裡結束", "HTTP 串流閒置 300 秒逾時、入口存取紀錄在 Envoy"),
+    (5, "g", "Envoy 依 HTTPRoute 挑一個 Pod，另開連線 ②", "10.244.1.97:40435 → 10.244.4.243:8080"),
+    (6, "g", "送到 worker-2（172.22.0.5）", "eBPF 直接送進 Pod，lxc 上抓不到"),
+    (7, "g", "App 在 8080 收到", "TCP 連線來源是 Envoy，不是主機"),
 ]
 # marker positions on the drawing
 MARK = {1: (110, 498), 2: (560, 604), 3: (276, 372), 4: (226, 215),
@@ -82,7 +83,6 @@ s = [f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img
 <text x="36" y="78" class="nn">tkha-control-plane-2</text>
 <text x="496" y="78" class="nn">tkha-worker-2</text>
 <text x="36" y="108" class="xip">172.22.0.201（Gateway IP，L2 宣告）</text>
-<text x="36" y="134" class="xip">10.244.1.237（ingress IP）</text>
 
 <!-- bridge + attachments -->
 <line class="ln" x1="340" y1="444" x2="340" y2="540"/>
@@ -97,8 +97,8 @@ s = [f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img
 
 <!-- control-plane-2 -->
 <rect class="env" x="250" y="180" width="180" height="70"/>
-<text x="340" y="203" class="lbl">cilium-envoy</text>
-<text x="340" y="230" class="tag">hostNetwork · pid 564</text>
+<text x="340" y="203" class="lbl" style="font-size:18px">cilium-envoy-6gmxd</text>
+<text x="340" y="230" class="tag">hostNetwork</text>
 <rect class="box" x="260" y="400" width="160" height="44"/>
 <text x="340" y="422" class="lbl">eth0</text>
 <text x="250" y="422" class="ip" text-anchor="end">172.22.0.2</text>
@@ -107,11 +107,11 @@ s = [f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" role="img
 <rect class="box" x="670" y="90" width="210" height="104"/>
 <text x="775" y="108" class="sm" style="font-size:17px">koupa-7f64658cd-tb9wt</text>
 <rect class="box" x="700" y="124" width="150" height="60" style="fill:#ffffff"/>
-<text x="775" y="143" class="sm">10.244.4.230</text>
+<text x="775" y="143" class="sm">10.244.4.243</text>
 <text x="775" y="166" class="sm">eth0</text>
 <line class="ln" x1="830" y1="194" x2="830" y2="250"/>
 <rect class="off" x="754" y="250" width="142" height="46"/>
-<text x="830" y="273" class="tag mt">lxcc16555cb6fee</text>
+<text x="830" y="273" class="tag mt">lxc4eb679cd400b</text>
 <text x="830" y="314" class="tag mt">連線 ② 不經過</text>
 <rect class="box" x="680" y="400" width="160" height="44"/>
 <text x="760" y="422" class="lbl">eth0</text>
@@ -134,7 +134,7 @@ for n, k, *_ in STEPS:
 px, py, pw, ph = 930, 52, 490, 648
 s.append(f'<rect class="side" x="{px}" y="{py}" width="{pw}" height="{ph}" rx="8"/>')
 s.append(f'<text x="{px + 24}" y="{py + 28}" class="sh">步驟</text>')
-s.append(f'<path class="pp" d="M{px + 110} {py + 28} H{px + 146}"/><text x="{px + 154}" y="{py + 28}" class="lg">連線 ①：瀏覽器 ↔ Envoy</text>')
+s.append(f'<path class="pp" d="M{px + 110} {py + 28} H{px + 146}"/><text x="{px + 154}" y="{py + 28}" class="lg">連線 ①：主機 ↔ Envoy</text>')
 s.append(f'<path class="gp" d="M{px + 110} {py + 54} H{px + 146}"/><text x="{px + 154}" y="{py + 54}" class="lg">連線 ②：Envoy ↔ Pod</text>')
 y0, step = py + 86, 70
 for i, (n, k, l1, l2) in enumerate(STEPS):
@@ -145,17 +145,22 @@ for i, (n, k, l1, l2) in enumerate(STEPS):
     s.append(f'<text x="{px + 66}" y="{y + 44}" class="s2">{l2}</text>')
 
 s.append(f'<line class="sep" x1="{px + 16}" y1="{py + ph - 70}" x2="{px + pw - 16}" y2="{py + ph - 70}"/>')
-s.append(f'<text x="{px + 24}" y="{py + ph - 48}" class="fn"><tspan class="v">灰底</tspan>\u2009的值會變動：重啟、重建或每條新連線都不同</text>')
-s.append(f'<text x="{px + 24}" y="{py + ph - 24}" class="fn">圖中是 2026-11-12 tkha 實測，請以自己查到的為準</text>')
+s.append(f'<text x="{px + 24}" y="{py + ph - 48}" class="fn"><tspan class="v">灰底</tspan>\u2009的值會變動：重啟或重建後會不同</text>')
+s.append(f'<text x="{px + 24}" y="{py + ph - 24}" class="fn">圖中是 2026-11-14 tkha 實測，請以自己查到的為準</text>')
 s.append("</svg>\n")
 import re
-VOL = ["564", "koupa-7f64658cd-tb9wt", "10.244.4.230", "10.244.1.237", "lxcc16555cb6fee", "45123", "38767"]
+# Values that change on restart / re-creation get a grey chip (only on the drawing, never in the step list).
+# Pod names: only the hash suffix changes, so only the suffix is chipped (no thin spaces inside the name).
+VOL = ["10.244.4.243", "lxc4eb679cd400b"]
+SUFFIX = ["6gmxd", "tb9wt"]
 def mark(m):
     head, body = m.group(1), m.group(2)
     if 'class="s1"' in head or 'class="s2"' in head:  # step list: no chips
         return m.group(0)
     for v in VOL:
         body = body.replace(v, f'\u2009<tspan class="v">{v}</tspan>\u2009')
+    for v in SUFFIX:
+        body = body.replace("-" + v, f'-<tspan class="v">{v}</tspan>\u2009')
     return head + body + "</text>"
 svg = re.sub(r'(<text\b[^>]*>)(.*?)</text>', mark, "\n".join(s))
 OUT_FILE.write_text(svg, encoding="utf-8")

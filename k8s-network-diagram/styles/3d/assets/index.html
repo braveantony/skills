@@ -1,0 +1,743 @@
+<title>看板連線 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: the 3D scene (Blender model, see model.md) on the left, the 7-step list on the right; stacks on phones.
+   Single light look on purpose (user rule: no dark theme). */
+:root {
+  --bg: #fafafa;
+  --surface: #ffffff;
+  --panel: #f1f2f5;
+  --line: #d4d6dc;
+  --ink: #232324;
+  --muted: #5c5f6a;
+  --chip: #e2e3e6;
+  --c1: #8e1f8c;
+  --c2: #3f9a4b;
+  --c2-fill: #4cb85a;
+  --font-body: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--font-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1440px; margin: 0 auto; padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; margin-bottom: 14px; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; color: var(--muted); margin: 0 0 4px; }
+h1 { font-size: clamp(22px, 3vw, 30px); line-height: 1.25; margin: 0; font-weight: 700; text-wrap: balance; }
+h1 small { display: block; font-size: .6em; font-weight: 500; color: var(--muted); margin-top: 4px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.seg button { font: inherit; font-size: 14px; border: 0; background: transparent; color: var(--ink); padding: 7px 14px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+button:focus-visible { outline: 2px solid var(--c1); outline-offset: 2px; }
+.stage canvas:focus-visible { outline: 3px solid var(--c1); outline-offset: -3px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+@media (max-width: 1000px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* the stage is a column: bar (legend + buttons) / 3D view / caption (full screen only).
+   Nothing floats over the 3D view, so no text or button ever covers the drawing. */
+.stage { position: relative; display: flex; flex-direction: column; height: clamp(440px, 76vh, 860px); border: 1px solid var(--line); border-radius: 10px; background: var(--bg); overflow: hidden; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 8px 10px; background: var(--surface); border-bottom: 1px solid var(--line); flex: none; }
+.vp { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; }
+.vp canvas { display: block; }
+#labels { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.lg { display: inline-flex; align-items: center; }
+.lg i { width: 12px; height: 4px; border-radius: 2px; background: currentColor; }
+.lg b { font-size: 12px; color: #fff; background: var(--lc); border-radius: 6px; padding: 0 6px; line-height: 18px; }
+.lg b span { color: #fff; }
+.c1 { color: var(--c1); --lc: var(--c1); } .c2 { color: var(--c2-fill); --lc: var(--c2-fill); }
+.tools { display: flex; gap: 8px; }
+.tools button { font: inherit; font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; cursor: pointer; color: var(--ink); }
+.stage.max { position: fixed; inset: 0; z-index: 50; height: auto; border-radius: 0; border: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.stage:fullscreen { height: 100%; border-radius: 0; border: 0; }
+.cap { display: none; align-items: center; gap: 8px; flex: none; background: var(--surface); border-top: 1px solid var(--line); padding: 8px 10px; }
+.stage.max .cap, .stage:fullscreen .cap { display: flex; }
+.cap .t { flex: 1; }
+.cap button { font: inherit; font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; cursor: pointer; color: var(--ink); flex: none; }
+.cap button.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.cap .n { width: 26px; height: 26px; border-radius: 50%; background: var(--c, var(--muted)); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: 13px; flex: none; }
+.cap .t { min-width: 0; font-size: 13px; line-height: 1.4; }
+.cap .t b { display: block; font-size: 14px; }
+.cap .t span { color: var(--muted); overflow-wrap: anywhere; }
+.stage.compact .legend { font-size: 12px; gap: 2px 12px; }
+.stage.compact .bar { padding: 6px 8px; gap: 4px 8px; }
+.stage.compact .tools button { font-size: 12px; padding: 3px 9px; }
+.note { margin: 8px 2px 0; font-size: 12.5px; color: var(--muted); }
+.parts { margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; }
+.parts h2 { font-size: 14px; margin: 0 0 6px; }
+.parts dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+.parts dt { font-weight: 700; }
+.parts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
+.parts dd code { font-family: var(--font-mono); font-size: 12.5px; }
+.parts .grp { grid-column: 1 / -1; margin-top: 6px; font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+.fallback[hidden] { display: none; }
+.mhint { display: none; margin: 2px 2px 0; font-size: 12.5px; color: var(--muted); }
+.flat .mhint { margin: 8px 12px; }
+@media (max-width: 640px) { .mhint { display: block; } }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; text-align: center; color: var(--muted); }
+.flat { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); overflow-x: auto; }
+.flat img { display: block; width: 100%; min-width: 760px; height: auto; }
+
+/* labels in the scene: names, NICs and IPs only (user rule) */
+.lb { font-size: 14px; color: var(--ink); background: rgba(255,255,255,.93); border: 1px solid var(--line); border-radius: 7px; padding: 2px 8px; white-space: nowrap; line-height: 1.45; text-align: left; }
+.lb b { font-weight: 700; }
+.lb .sub { display: block; font-size: 12px; color: var(--muted); }
+.lb code, .ip { font-family: var(--font-mono); font-size: 13px; }
+.lb.node { font-size: 15px; }
+.lb.nic { border: 1.5px solid var(--ink); }
+.pill { display: inline-block; font-size: 11px; font-weight: 700; border: 1.2px solid var(--ink); border-radius: 9px; padding: 0 6px; margin-left: 6px; background: #eef1f6; }
+.v { background: var(--chip); border-radius: 4px; padding: 0 3px; }
+/* every label, pill and marker is placed by layout() in screen space, away from lines, NICs and models */
+#labels .it { position: absolute; left: 0; top: 0; }
+#labels .it.off { visibility: hidden; }
+#leaders { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage.compact .lb { font-size: 12px; }
+.stage.compact .lb code { font-size: 11px; }
+.stage.compact .k-switch code { display: block; }   /* two lines on phones: narrower */
+
+.mk { pointer-events: auto; }
+.mk button { width: 34px; height: 34px; border-radius: 50%; border: 2.5px solid #fff; background: var(--c); color: #fff; font: 700 16px var(--font-body); cursor: pointer; display: grid; place-items: center; padding: 0; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.mk.on button { width: 42px; height: 42px; font-size: 18px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 30%, transparent), 0 1px 4px rgba(0,0,0,.25); }
+.mk.dim { opacity: .35; }
+.conn { font: 700 15px var(--font-body); color: #fff; background: var(--c); border-radius: 9px; padding: 1px 9px; border: 2px solid #fff; }
+
+/* step list */
+.side h2 { font-size: 16px; margin: 0 0 10px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.steps button { all: unset; box-sizing: border-box; width: 100%; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.steps button:focus-visible { outline: 2px solid var(--c); outline-offset: 2px; }
+.steps button[aria-current="step"] { background: var(--surface); border-color: var(--c); box-shadow: inset 3px 0 0 var(--c); }
+.steps .n { width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: 14px; }
+.steps .t { min-width: 0; }
+.steps .t div:first-child { font-weight: 700; font-size: 15px; }
+.steps .t div + div { color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+.nav { display: flex; gap: 8px; margin-top: 10px; }
+.nav button { font: inherit; font-size: 14px; flex: 1; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px; cursor: pointer; color: var(--ink); }
+.nav button.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.foot { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+.foot p { margin: 0 0 4px; }
+@media (prefers-reduced-motion: reduce) { .mk button { transition: none; } }
+</style>
+
+<div class="sr" id="live" aria-live="polite"></div>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">Koupa 酷杯 · 階段 01 · tkha 實測</p>
+      <h1>看板連線怎麼走<small>主機 → Envoy（control-plane-2）→ koupa Pod（worker-2）</small></h1>
+    </div>
+    <div class="seg" role="group" aria-label="檢視方式">
+      <button id="v3" aria-pressed="true">3D</button>
+      <button id="v2" aria-pressed="false">平面圖</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div>
+      <div class="stage" id="stage">
+        <div class="bar">
+        <div class="legend" aria-hidden="true">
+          <span><span class="lg c1"><i></i><b><span>①</span></b><i></i></span>連線 ①：主機 ↔ Envoy</span>
+          <span><span class="lg c2"><i></i><b><span>②</span></b><i></i></span>連線 ②：Envoy ↔ Pod</span>
+        </div>
+        <div class="tools">
+          <button id="reset">回到全圖</button>
+          <button id="full" aria-pressed="false">全螢幕</button>
+        </div>
+        </div>
+        <div class="vp" id="vp">
+          <div id="labels"></div>
+          <div class="fallback" id="fallback" hidden>這個瀏覽器無法顯示 3D，請切到「平面圖」。</div>
+        </div>
+        <div class="cap" id="cap">
+          <button id="cprev" aria-label="上一步">‹</button>
+          <span class="n" id="cn">·</span>
+          <span class="t" id="ct"><b>點 › 或「播放」開始</b><span>拖曳可旋轉，滾輪或雙指縮放</span></span>
+          <button id="cnext" aria-label="下一步">›</button>
+          <button id="cplay" class="primary">播放</button>
+        </div>
+      </div>
+      <p class="note" id="note">拖曳旋轉 · 滾輪或雙指縮放 · 點圓圈或步驟清單看每一步</p>
+      <section class="parts" id="parts" hidden aria-label="圖上的元件">
+        <h2>圖上的元件</h2>
+        <dl>
+          <dt>主機</dt><dd><code>172.22.0.254</code></dd>
+          <dt>podman2</dt><dd>交換器 <code>172.22.0.0/24</code></dd>
+          <div class="grp">tkha-control-plane-2（node）</div>
+          <dt>eth0</dt><dd><code>172.22.0.2</code>，Gateway <code>172.22.0.201</code></dd>
+          <dt>Pod</dt><dd>cilium-envoy-<span class="v">6gmxd</span>（ns kube-system，hostNetwork）</dd>
+          <div class="grp">tkha-worker-2（node）</div>
+          <dt>eth0</dt><dd><code>172.22.0.5</code></dd>
+          <dt>lxc</dt><dd><code class="v">lxc4eb679cd400b</code></dd>
+          <dt>Pod</dt><dd>koupa-7f64658cd-<span class="v">tb9wt</span>（ns koupa）</dd>
+          <dt>Pod eth0</dt><dd><code class="v">10.244.4.243</code></dd>
+        </dl>
+      </section>
+      <p class="mhint" id="mhint">往下看請從 3D 畫面外面滑動</p>
+      <div class="flat" id="flat" hidden>
+        <p class="mhint">平面圖可以左右捲動</p>
+        <img src="final.png" alt="看板連線的平面網路圖：主機經 podman2 交換器連到 tkha-control-plane-2 上 hostNetwork 的 cilium-envoy（連線 ①）；Envoy 另開連線 ②，經交換器到 tkha-worker-2，eBPF 直接送進 koupa Pod。右側是步驟 1 到 7。">
+      </div>
+    </div>
+
+    <aside class="side">
+      <h2>步驟</h2>
+      <ol class="steps" id="steps"></ol>
+      <div class="nav">
+        <button id="prev">上一步</button>
+        <button id="play" class="primary">播放全部</button>
+        <button id="next">下一步</button>
+      </div>
+      <div class="foot">
+        <p><span class="v">灰底</span>的值會變動：重啟或重建後會不同</p>
+        <p>圖中是 2026-11-14 tkha 實測，請以自己查到的為準</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js" integrity="sha384-vV17nr/rMaJqmeZkFUzXLpHdQ+ME5QHKdydaqqN+3Ga39RJlNrTatJxHwGV4ml2C" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js" integrity="sha384-I0DMsfimAPIqWT8lF+oA997gRgdUi3jhidoTq3fN0zmn35smXZukD01FLnsPRU9i" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js" integrity="sha384-FassWWYNEPQsuRQm+59KIMcDetEc30bNyE9yfx16Ok8lvoowyH81LtrPmLWltJMh" crossorigin="anonymous"></script>
+<script>
+// Scene data: anchors and connection polylines of the model in scene-glb.txt (glTF Y-up). The Blender script was not kept; see model.md.
+const D = {"anchors":{"cp_eth0":[-5.97,1.63,6.061],"cp_top":[-22.18,3.8,-0.939],"wk_eth0":[3.184,1.63,-8.221],"wk_top":[-0.316,3.8,-18.431],"envoy_ctr":[-13.28,1.94,2.011],"envoy_floor":[-15.28,0.34,2.711],"envoy_top":[-13.68,2.99,2.161],"koupa_ctr":[4.584,1.94,-15.481],"koupa_eth0":[5.734,1.48,-13.891],"koupa_top":[4.184,2.99,-15.331],"lxc":[1.134,0.894,-11.841],"switch":[1.984,0.6,7.361],"switch_top":[1.984,1.25,6.061],"host_top":[1.093,3.2,15.774],"host_front":[1.093,0.5,17.074],"p1_mid":[0.384,2.2,10.817],"p2_mid":[3.784,2.8,-1.355],"p1_end":[-13.83,1.6,3.061],"p2_start":[-11.68,2.2,1.811]},"p1":[[0.384,1.6,15.174],[0.384,1.6,6.461],[-13.83,1.6,6.461],[-13.83,1.6,3.061]],"p2":[[-11.68,2.2,1.811],[-10.53,2.2,1.811],[-10.53,2.2,5.661],[-5.97,2.2,5.661],[3.784,2.2,5.661],[3.784,2.2,-9.271],[6.184,2.2,-9.271],[6.184,1.3,-13.391]],"target":[-1.0,1.5,1.0],"camdir":[0.8,2.0,1.0]};
+const A = D.anchors;
+const mid = (a, b) => a.map((v, i) => (v + b[i]) / 2);
+
+// Step text: identical to the flat diagram (final.png). seg = [path, from point index, to point index]
+// at = the point the step is about; its marker is placed next to it by layout(). rel = labels that belong to the step.
+const STEPS = [
+  { c: 1, t: "curl http://172.22.0.201/events", s: "172.22.0.254:33144 → 172.22.0.201:80", at: A.host_top, seg: ["p1", 0, 1], rel: ["host", "switch"] },
+  { c: 1, t: "誰有 172.22.0.201？", s: "control-plane-2 回 ARP（L2 宣告）", at: A.cp_eth0, seg: null, rel: ["cpeth", "switch"] },
+  { c: 1, t: "eBPF 把封包直接交給 Envoy", s: "（目的地址不改，lo 上抓不到）", at: mid(A.cp_eth0, A.p1_end), seg: ["p1", 1, 3], rel: ["cpeth", "envoy"] },
+  { c: 1, t: "連線 ① 在這裡結束", s: "HTTP 串流閒置 300 秒逾時、入口存取紀錄在 Envoy", at: A.p1_end, seg: ["p1", 3, 3], rel: ["envoy"] },
+  { c: 2, t: "Envoy 依 HTTPRoute 挑一個 Pod，另開連線 ②", s: "10.244.1.97:40435 → 10.244.4.243:8080", at: A.p2_start, seg: ["p2", 0, 3], rel: ["envoy", "cpeth"] },
+  { c: 2, t: "送到 worker-2（172.22.0.5）", s: "eBPF 直接送進 Pod，lxc 上抓不到", at: A.wk_eth0, seg: ["p2", 3, 7], rel: ["wketh", "lxc"] },
+  { c: 2, t: "App 在 8080 收到", s: "TCP 連線來源是 Envoy，不是主機", at: A.koupa_ctr, seg: ["p2", 7, 7], rel: ["koupa", "koupaeth"] },
+];
+const ANCH = { host: A.host_front, switch: A.switch_top, cpeth: A.cp_eth0, envoy: A.envoy_top, wketh: A.wk_eth0, lxc: A.lxc, koupa: A.koupa_top, koupaeth: A.koupa_eth0, cpnode: A.cp_top, wknode: A.wk_top };
+// label key -> the BOXES entry framed together with it (a Pod label has to sit outside the whole Pod)
+const LABEL_BOX = { envoy: "Envoy Pod", koupa: "koupa Pod" };
+// anchor -> what it must sit on (a BOXES / NODES name, "p1" / "p2", or "mesh:<mesh name>"; a trailing * matches a prefix); overlap.mjs checks this against the loaded model
+const ANCHOR_ON = { cp_eth0: "NIC cp_eth0", wk_eth0: "NIC wk_eth0", koupa_eth0: "NIC koupa_eth0", lxc: "NIC lxc",
+  cp_top: "tkha-control-plane-2", wk_top: "tkha-worker-2", envoy_top: "Envoy Pod", koupa_top: "koupa Pod", envoy_ctr: "mesh:ctr", koupa_ctr: "mesh:ctr001", envoy_floor: "Envoy Pod",
+  switch: "switch", switch_top: "switch", host_top: "host screen", host_front: "host", p1_mid: "p1", p2_mid: "p2", p1_end: "p1", p2_start: "p2" };
+// data check: names used across the data section must exist; a typo otherwise surfaces later as "x is not iterable"
+const dataErrors = [];
+for (const [k, v] of Object.entries(ANCH)) if (!v) dataErrors.push(`ANCH.${k} points at a missing anchor`);
+for (const k of ["p1_mid", "p2_mid"]) if (!A[k]) dataErrors.push(`anchor ${k} (used by the pills) is missing`);
+STEPS.forEach((s, i) => {
+  if (!s.at) dataErrors.push(`STEPS[${i}].at points at a missing anchor`);
+  s.rel.forEach((r) => { if (!(r in ANCH)) dataErrors.push(`STEPS[${i}].rel "${r}" is not an ANCH key`); });
+  if (s.seg && !(D[s.seg[0]] && s.seg[1] <= s.seg[2] && s.seg[2] < D[s.seg[0]].length)) dataErrors.push(`STEPS[${i}].seg is out of range`);
+});
+for (const k of Object.keys(LABEL_BOX)) if (!(k in ANCH)) dataErrors.push(`LABEL_BOX key "${k}" is not an ANCH key`);
+if (dataErrors.length) throw new Error("data check: " + dataErrors.join("; "));
+const COL = { 1: "#8e1f8c", 2: "#4cb85a" };
+const rm = matchMedia("(prefers-reduced-motion: reduce)"); let reduce = rm.matches;
+rm.addEventListener?.("change", (e) => { reduce = e.matches; window.onReduce?.(); });
+
+// ---------- step list ----------
+const list = document.getElementById("steps");
+STEPS.forEach((st, i) => {
+  const li = document.createElement("li");
+  li.innerHTML = `<button style="--c:${COL[st.c]}" data-i="${i}"><span class="n">${i + 1}</span><span class="t"><div>${st.t}</div><div>${st.s}</div></span></button>`;
+  list.appendChild(li);
+});
+let cur = -1, playing = false, playTimer = null;
+
+// ---------- 3D ----------
+const stage = document.getElementById("stage"), vp = document.getElementById("vp");
+let renderer, scene, camera, controls, packet, packetHalo, markers = [], ok = true;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.setClearColor(0xfafafa);
+  vp.prepend(renderer.domElement);
+} catch (e) { ok = false; }
+
+if (!ok || !window.THREE || !THREE.GLTFLoader) {
+  document.getElementById("fallback").hidden = false;
+} else {
+  scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc9ccd4, 0.85));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(14, 30, 18); scene.add(sun);
+
+  camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 500);
+  const T0 = new THREE.Vector3(...D.target);
+  const DIR = new THREE.Vector3(...D.camdir).normalize();
+  camera.position.copy(T0).addScaledVector(DIR, 120);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.target.copy(T0); controls.enableDamping = !reduce; controls.dampingFactor = 0.12;
+  controls.minZoom = 0.4; controls.maxZoom = 5; controls.maxPolarAngle = Math.PI * 0.47;
+  controls.screenSpacePanning = true;
+  renderer.domElement.tabIndex = 0; renderer.domElement.setAttribute("aria-label", "3D 場景：方向鍵平移，拖曳旋轉，滾輪縮放");
+  controls.listenToKeyEvents(renderer.domElement);
+
+  // outlines like the rendered diagram
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x15171c, transparent: true, opacity: 0.55 });
+  const loadFail = () => { const f = document.getElementById("fallback"); f.hidden = false; f.textContent = "3D 模型載入失敗，請切到「平面圖」。"; };
+  // the model ships as base64 text (scene-glb.txt), decoded here and parsed in place
+  fetch("scene-glb.txt").then((r) => r.ok ? r.text() : Promise.reject(r.status)).then((t) => {
+    const bin = atob(t.trim()); const buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+    new THREE.GLTFLoader().parse(buf.buffer, "", onModel, loadFail);
+  }).catch(loadFail);
+  function onModel(g) {
+    g.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const m = o.material;
+      if (m) { m.metalness = 0; m.roughness = Math.max(m.roughness ?? 0.8, 0.6); if (m.transparent) m.depthWrite = false; }
+      // the containers were near-white on a white floor: give them a clear amber (body) and a darker lid
+      if (m && m.name === "container") m.color.setHex(0xe6a23c).convertSRGBToLinear();
+      if (m && m.name === "container_top") m.color.setHex(0xa86a14).convertSRGBToLinear();
+      const e = new THREE.LineSegments(new THREE.EdgesGeometry(o.geometry, 35), edgeMat);
+      o.add(e);
+    });
+    scene.add(g.scene);
+  }
+
+  // packet
+  packet = new THREE.Mesh(new THREE.SphereGeometry(0.42, 24, 16), new THREE.MeshBasicMaterial({ color: COL[1] }));
+  packetHalo = new THREE.Mesh(new THREE.SphereGeometry(0.75, 24, 16), new THREE.MeshBasicMaterial({ color: COL[1], transparent: true, opacity: 0.25, depthWrite: false }));
+  packet.add(packetHalo); packet.visible = false; scene.add(packet);
+
+  // ---------- labels, pills and step markers ----------
+  // They are plain DOM boxes placed in screen space by layout(): for each one it tries spots around its anchor and
+  // takes the cheapest, where covering a connection line, a NIC, a model, a button bar or another text costs a lot.
+  // Optional ones that cannot find a clean spot are hidden; a thin leader line points back to the anchor.
+  const layer = document.getElementById("labels");
+  const svgNS = "http://www.w3.org/2000/svg";
+  const leaders = document.createElementNS(svgNS, "svg"); leaders.id = "leaders"; leaders.setAttribute("aria-hidden", "true"); layer.appendChild(leaders);
+  const items = [];
+  const add = (el, anchor, o) => { el.classList.add("it"); if (o.key) el.dataset.key = o.key; layer.appendChild(el); const it = { el, anchor: new THREE.Vector3(...anchor), prev: null, ...o }; items.push(it); return it; };
+  const label = (key, html, cls, pref) => { if (!(key in ANCH)) throw new Error(`data check: label("${key}") is not an ANCH key`); const d = document.createElement("div"); d.className = "lb " + cls; d.innerHTML = html; return add(d, ANCH[key], { kind: "label", key, pref }); };
+  // pref: preferred screen direction (x right, y down), used only to break ties
+  label("cpnode", `<b>tkha-control-plane-2</b><span class="sub">node</span>`, "node", [0.5, -1]);
+  label("wknode", `<b>tkha-worker-2</b><span class="sub">node</span>`, "node", [0, -1]);
+  label("envoy", `<b>cilium-envoy-<span class="v">6gmxd</span></b><span class="sub">ns kube-system<span class="pill">hostNetwork</span></span>`, "", [0, -1]);
+  label("koupa", `<b>koupa-7f64658cd-<span class="v">tb9wt</span></b><span class="sub">ns koupa</span>`, "", [0, -1]);
+  label("cpeth", `<b>eth0</b> <code>172.22.0.2</code><span class="sub ip">Gateway 172.22.0.201</span>`, "nic", [-0.5, 1]);
+  label("wketh", `<b>eth0</b> <code>172.22.0.5</code>`, "nic", [-1, 0.3]);
+  label("koupaeth", `<b>eth0</b> <code class="v">10.244.4.243</code>`, "nic", [1, 0.5]);
+  label("lxc", `<b>lxc</b> <code class="v">lxc4eb679cd400b</code>`, "nic", [-1, 0.3]);
+  label("switch", `<b>podman2</b> <code>172.22.0.0/24</code>`, "k-switch", [1, 0.5]);
+  label("host", `<b>主機</b> <code>172.22.0.254</code>`, "", [0, 1]);
+  const pill = (txt, c, pos) => { const d = document.createElement("div"); d.className = "conn"; d.style.setProperty("--c", COL[c]); d.textContent = txt; add(d, pos, { kind: "pill", c, home: new THREE.Vector3(...pos), pref: [1, 0] }); };
+  pill("①", 1, [A.p1_mid[0], D.p1[0][1], A.p1_mid[2]]);   // at the height of the connection tube
+  pill("②", 2, [A.p2_mid[0], D.p2[0][1], A.p2_mid[2]]);
+  STEPS.forEach((st, i) => {
+    const d = document.createElement("div"); d.className = "mk"; d.style.setProperty("--c", COL[st.c]);
+    d.innerHTML = `<button aria-label="步驟 ${i + 1}：${st.t}">${i + 1}</button>`;
+    d.querySelector("button").addEventListener("click", () => go(i, true));
+    add(d, st.at, { kind: "mk", i, color: COL[st.c], pref: [0.6, -1] }); markers.push(d);
+  });
+
+  // what text must not cover (world-space, from the Blender model)
+  const W3 = (a) => new THREE.Vector3(...a);
+  const heavySegs = [], lightSegs = [], heavyBoxes = [];
+  const poly = (arr, into) => { for (let i = 0; i < arr.length - 1; i++) into.push([W3(arr[i]), W3(arr[i + 1])]); };
+  poly(D.p1, heavySegs); poly(D.p2, heavySegs);
+  // cables and veth as polylines (cab_*, veth* in the model)
+  const CABLES = {
+    "cable host-switch": [[1.09, 0.35, 14.47], [1.09, 0.35, 7.36]],
+    "cable switch-cp_eth0": [[-0.52, 0.35, 6.06], [-5.52, 0.35, 6.06], [-6.07, 1.25, 6.06]],
+    "cable switch-wk_eth0": [[3.18, 0.35, 4.76], [3.18, 0.35, -7.78], [3.18, 1.2, -8.3]],
+    "veth lxc-koupa_eth0": [[1.13, 0.7, -12.07], [1.13, 0.7, -13.29], [5.73, 0.7, -13.29], [5.73, 1.2, -13.89]],
+  };
+  Object.values(CABLES).forEach((p) => poly(p, heavySegs));
+  const edges = (mn, mx, into) => {   // the 12 edges of a box: Pod frames and node outlines
+    const c = (i) => [i & 1 ? mx[0] : mn[0], i & 2 ? mx[1] : mn[1], i & 4 ? mx[2] : mn[2]];
+    [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]].forEach(([a, b]) => into.push([W3(c(a)), W3(c(b))]));
+  };
+  // node outlines [min, max] (node_post*, node_rail*, node_wall* in the model)
+  const NODES = { "tkha-control-plane-2": [[-23.23, 0.2, -0.99], [-6.13, 3.85, 9.11]], "tkha-worker-2": [[-1.37, 0.2, -18.48], [15.73, 3.85, -8.38]] };
+  Object.values(NODES).forEach(([mn, mx]) => edges(mn, mx, lightSegs));
+  // model boxes [min, max]. scripts/overlap.mjs measures against these same objects (window.OBST) and checks them against the loaded model
+  const BOXES = {
+    "NIC cp_eth0": [[-6.18, 1.04, 5.25], [-5.98, 2.36, 6.87]], "NIC wk_eth0": [[2.37, 1.04, -8.43], [3.99, 2.36, -8.23]],
+    "NIC koupa_eth0": [[4.92, 0.89, -14.1], [6.54, 2.21, -13.9]], "NIC lxc": [[0.18, 0.2, -12.69], [2.08, 1.48, -11.85]],
+    "switch": [[-0.52, 0, 4.76], [4.48, 1.2, 7.36]], "host": [[-0.91, 0, 14.47], [3.09, 1, 17.07]], "host screen": [[-0.71, 0.95, 15.31], [2.89, 3.05, 15.45]],
+    "Envoy Pod": [[-16.71, 0.2, 0.94], [-10.65, 2.79, 3.38]], "koupa Pod": [[1.15, 0.2, -16.55], [7.21, 2.79, -14.11]],
+  };
+  window.OBST = { boxes: BOXES, cables: CABLES, nodes: NODES, anchorsOn: ANCHOR_ON };
+  for (const [k, b] of Object.entries(LABEL_BOX)) if (!BOXES[b]) throw new Error(`data check: LABEL_BOX "${k}" names a missing BOXES entry "${b}"`);
+  Object.values(BOXES).forEach(([mn, mx]) => heavyBoxes.push([0, 1, 2, 3, 4, 5, 6, 7].map((i) => W3([i & 1 ? mx[0] : mn[0], i & 2 ? mx[1] : mn[1], i & 4 ? mx[2] : mn[2]]))));
+
+  const PV = new THREE.Vector3();
+  const segHit = (r, a, b, p) => {   // Liang-Barsky: does segment a-b touch rect r grown by p?
+    const x0 = r[0] - p, y0 = r[1] - p, x1 = r[2] + p, y1 = r[3] + p, dx = b[0] - a[0], dy = b[1] - a[1];
+    let t0 = 0, t1 = 1;
+    for (const [P, Q] of [[-dx, a[0] - x0], [dx, x1 - a[0]], [-dy, a[1] - y0], [dy, y1 - a[1]]]) {
+      if (P === 0) { if (Q < 0) return false; continue; }
+      const t = Q / P;
+      if (P < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
+    }
+    return true;
+  };
+  const rectHit = (r, q, p) => r[0] < q[2] + p && q[0] < r[2] + p && r[1] < q[3] + p && q[1] < r[3] + p;
+  const DIRS = Array.from({ length: 16 }, (_, k) => [Math.cos(k * Math.PI / 8), Math.sin(k * Math.PI / 8)]);
+  const DIST = [8, 20, 36, 56, 80, 110, 150, 200, 260, 330];
+  // priority: 0 = current marker, 1 = labels of the current step, 2 = node and Pod names, pills, overview markers;
+  // 3 = other labels (desktop); 9 = not shown. Items of priority 2+ are hidden when they cannot find a clean spot.
+  const prio = (it, compact) => {
+    if (cur < 0 && it.kind === "label") return compact ? (it.key.endsWith("node") ? 2 : 3) : 1;
+    if (it.kind === "mk") return cur < 0 ? 2 : it.i === cur ? 0 : 9;
+    if (it.kind === "pill") return cur >= 0 && STEPS[cur].c === it.c ? 1.6 : 2;
+    if (cur >= 0 && STEPS[cur].rel.includes(it.key)) return 1;
+    if (it.key.endsWith("node") || it.key === "envoy" || it.key === "koupa") return 2;
+    return compact ? 9 : 3;
+  };
+  // middle (by length) of the current step's path, where its connection pill goes
+  const segMid = (st) => {
+    if (!st.seg || st.seg[2] - st.seg[1] < 1) return null;
+    const pts = D[st.seg[0]].slice(st.seg[1], st.seg[2] + 1).map(W3);
+    const lens = pts.slice(1).map((q, i) => q.distanceTo(pts[i])); let f = lens.reduce((x, y) => x + y, 0) / 2, i = 0;
+    while (i < lens.length - 1 && f > lens[i]) { f -= lens[i]; i++; }
+    return pts[i].clone().lerp(pts[i + 1], f / lens[i]);
+  };
+  let layoutKey = "", sizesDirty = true, lastLines = "";
+  // clear = forget the old spots (new step or back to the overview), so nothing keeps the previous step's place
+  window.relayout = (clear) => { layoutKey = ""; sizesDirty = true; if (clear) items.forEach((it) => { it.prev = null; }); };
+  const segX = (a, b, c, d) => {   // do segments a-b and c-d cross?
+    const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+    return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+  };
+  window.layoutMustFail = false;
+  function layout(dry) {
+    const w = vp.clientWidth, h = vp.clientHeight; if (!w || !h) return;
+    const compact = stage.classList.contains("compact");
+    if (sizesDirty) { items.forEach((it) => { it.w = it.el.offsetWidth; it.h = it.el.offsetHeight; }); sizesDirty = false; }
+    const S = (p) => { PV.copy(p).project(camera); return [(PV.x + 1) / 2 * w, (1 - PV.y) / 2 * h]; };
+    const heavy = heavySegs.map(([a, b]) => [S(a), S(b)]), light = lightSegs.map(([a, b]) => [S(a), S(b)]);
+    const st = cur >= 0 ? STEPS[cur] : null, glow = [];
+    const halo = 0.75 * 1.35 * (w / (camera.right - camera.left)) * camera.zoom + 4;   // largest glow radius on screen
+    if (st && st.seg) { const pp = D[st.seg[0]].slice(st.seg[1], st.seg[2] + 1).map((q) => S(W3(q))); if (pp.length === 1) glow.push([pp[0], pp[0]]); for (let k = 0; k < pp.length - 1; k++) glow.push([pp[k], pp[k + 1]]); }
+    const boxes = heavyBoxes.map((cs) => { const ps = cs.map(S); return [Math.min(...ps.map((p) => p[0])), Math.min(...ps.map((p) => p[1])), Math.max(...ps.map((p) => p[0])), Math.max(...ps.map((p) => p[1]))]; });
+    const placed = [], leads = [];
+    let lines = "", mustFail = false;
+    const order = items.map((it) => [it, prio(it, compact)]).sort((a, b) => a[1] - b[1]);
+    for (const [it, p] of order) {
+      const el = it.el;
+      if (p >= 9) { if (!dry) { el.classList.add("off"); it.prev = null; } continue; }
+      if (it.kind === "pill") { const m = st && st.c === it.c ? segMid(st) : null; it.anchor = m || it.home; }
+      const a = S(it.anchor);
+      const pad = it.kind === "mk" && it.i === cur ? 6 : 0;   // glow ring of the current marker
+      const bw = it.w + pad * 2, bh = it.h + pad * 2;
+      const ownBoxes = boxes.filter((q) => a[0] >= q[0] - 14 && a[0] <= q[2] + 14 && a[1] >= q[1] - 14 && a[1] <= q[3] + 14);   // the model this anchor belongs to
+      const at = (ux, uy, d) => { const k = d + Math.min(bw / 2 / Math.max(Math.abs(ux), 1e-6), bh / 2 / Math.max(Math.abs(uy), 1e-6));
+        const cx = a[0] + ux * k, cy = a[1] + uy * k; return [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2]; };
+      const edge = (r) => [Math.max(r[0], Math.min(a[0], r[2])), Math.max(r[1], Math.min(a[1], r[3]))];
+      const near = it.kind === "pill";
+      const cost = (r, d) => {
+        if (r[0] < 4 || r[1] < 4 || r[2] > w - 4 || r[3] > h - 4) return 1e6;   // cut by the edge
+        let c = 0;
+        for (const [s0, s1] of heavy) if (segHit(r, s0, s1, 4)) c += 10;
+        for (const [s0, s1] of glow) if (segHit(r, s0, s1, halo)) c += 10;   // where the packet and its glow travel
+        for (const q of boxes) if (rectHit(r, q, 3)) c += 10;
+        for (const q of placed) if (rectHit(r, q, 4)) c += 50;
+        for (const [s0, s1] of leads) if (segHit(r, s0, s1, 3)) c += 10;   // text over another leader
+        for (const [s0, s1] of light) if (segHit(r, s0, s1, 2)) c += 1;
+        if (d > 12 && !near) {   // the leader itself: must not run through other text or through models it does not belong to
+          const e = edge(r);
+          for (const q of placed) if (segHit(q, e, a, 2)) c += 15;
+          for (const q of boxes) if (!ownBoxes.includes(q) && segHit(q, e, a, 0)) c += 8;
+        }
+        return c;
+      };
+      const pref = it.pref || [0, -1], pl = Math.hypot(...pref);
+      // pills stay right next to their line (or are hidden); markers and labels prefer short leaders
+      const maxD = near ? (st && st.c === it.c ? Math.max(36, halo + 40) : 36) : (it.kind === "mk" && cur < 0) || p >= 2 ? 110 : 1e9, dk = it.kind === "mk" ? 0.03 : 0.012;
+      const cross = (r, d) => {
+        if (d <= 12 || near) return 0;
+        const e = edge(r); let x = 0;
+        for (const [s0, s1] of heavy) if (segX(e, a, s0, s1)) x += 0.8;
+        for (const [s0, s1] of leads) if (segX(e, a, s0, s1)) x += 1.2;
+        return x;
+      };
+      const score = (ux, uy, d, r) => cost(r, d) + cross(r, d) + d * dk + (1 - (ux * pref[0] + uy * pref[1]) / pl) * 0.05;
+      let best = null;   // the best clean spot; spots that touch anything are never chosen
+      for (const d of DIST) if (d <= maxD) for (const [ux, uy] of DIRS) {
+        const r = at(ux, uy, d), c = cost(r, d); if (c >= 1) continue;
+        const s = score(ux, uy, d, r); if (!best || s < best.s) best = { s, c, r, ux, uy, d };
+      }
+      if (best && it.prev && !dry) {   // keep the old spot while it is clean and nearly as good, so text does not jump while the camera moves
+        const [ux, uy, d] = it.prev, r = at(ux, uy, d), pc = cost(r, d), ps = score(ux, uy, d, r);
+        if (d <= maxD && pc < 1 && ps < best.s + 0.3) best = { s: ps, c: pc, r, ux, uy, d };
+      }
+      if (!best) { if (p < 1.5) mustFail = true; if (!dry) { el.classList.add("off"); it.prev = null; } continue; }
+      placed.push(best.r);
+      if (dry) { if (best.d > 12 && !near) leads.push([edge(best.r), a]); continue; }
+      el.classList.remove("off"); it.prev = [best.ux, best.uy, best.d];
+      el.style.transform = `translate(${Math.round(best.r[0] + pad)}px, ${Math.round(best.r[1] + pad)}px)`;
+      if (best.d > 12 && !near) {   // leader from the box edge back to the anchor, grey and dashed so it never reads as a connection
+        const e = edge(best.r); leads.push([e, a]);
+        lines += `<line x1="${e[0].toFixed(1)}" y1="${e[1].toFixed(1)}" x2="${a[0].toFixed(1)}" y2="${a[1].toFixed(1)}" stroke="#8a8d96" stroke-width="1.2" stroke-dasharray="3 2"/><circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="2.2" fill="#8a8d96"/>`;
+      }
+    }
+    if (dry) return mustFail;
+    if (lines !== lastLines) { leaders.innerHTML = lines; lastLines = lines; }
+    window.layoutMustFail = mustFail;
+  }
+  // the overview is planned with the real label sizes, so frame it again once the fonts are in
+  if (document.fonts) document.fonts.ready.then(() => { window.relayout(); if (cur < 0 && window.frameOverview && !window.cameraMoved()) window.frameOverview(); });
+
+  // fit the orthographic frustum to the stage
+  const fit = () => {
+    const w = vp.clientWidth, h = vp.clientHeight, half = 27;
+    if (!w || !h) return;   // hidden (flat view)
+    const a = w / h; const hw = a >= 1.5 ? half : Math.max(20 * a, 22);
+    camera.left = -hw; camera.right = hw; camera.top = hw / a; camera.bottom = -hw / a; camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+    stage.classList.toggle("compact", w < 640);
+    document.getElementById("parts").hidden = w >= 640;
+    window.relayout(true);
+    if (window.frameStep && !window.cameraMoved()) { if (cur >= 0) window.frameStep(STEPS[cur]); else window.frameOverview(); }
+  };
+  if ("ResizeObserver" in window) new ResizeObserver(fit).observe(vp); else addEventListener("resize", fit);
+  fit(); window.fitStage = fit;
+
+  // camera focus animation
+  let focus = null;
+  window.focusTo = (pos, zoom) => {
+    const to = new THREE.Vector3(...pos);
+    if (reduce) {   // no camera motion: jump straight there
+      const d = to.sub(controls.target); controls.target.add(d); camera.position.add(d);
+      camera.zoom = zoom; camera.updateProjectionMatrix(); focus = null; return;
+    }
+    if (to.distanceTo(controls.target) < 1e-3 && Math.abs(zoom - camera.zoom) < 1e-3) return;   // already there
+    if (focus && focus.to.distanceTo(to) < 1e-3 && Math.abs(focus.z1 - zoom) < 1e-3) return;     // already heading there
+    focus = { from: controls.target.clone(), to, z0: camera.zoom, z1: zoom, t: 0 };
+  };
+  let userMoved = false, shrink = 0;
+  window.cameraMoved = () => userMoved;
+  controls.addEventListener("start", () => { focus = null; userMoved = true; });
+  // frame a step: fit its path, its point and its labels into the part of the stage not covered by the legend,
+  // buttons and caption, leaving room around them for the labels
+  window.frameStep = (st, keepShrink, instant) => {
+    const w = vp.clientWidth, h = vp.clientHeight; if (!w || !h) return;
+    if (!keepShrink) { shrink = 0; userMoved = false; }
+    const pts = [];
+    if (!st) {   // overview: every node and every model box (min and max corners)
+      for (const b of [...Object.values(OBST.nodes), ...Object.values(OBST.boxes)]) pts.push(...b);
+    } else {
+      if (st.seg) for (let k = st.seg[1]; k <= st.seg[2]; k++) pts.push(D[st.seg[0]][k]);
+      pts.push(st.at); st.rel.forEach((k) => pts.push(ANCH[k]));
+      // a Pod's label has to sit outside the whole Pod, so frame the Pod too
+      st.rel.forEach((k) => { if (LABEL_BOX[k]) pts.push(...OBST.boxes[LABEL_BOX[k]]); });
+    }
+    const q = camera.quaternion, R = new THREE.Vector3(1, 0, 0).applyQuaternion(q), U = new THREE.Vector3(0, 1, 0).applyQuaternion(q), F = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, fz = 0;
+    pts.forEach((p) => { const v = W3(p); const x = v.dot(R), y = v.dot(U); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); fz += v.dot(F) / pts.length; });
+    const compact = stage.classList.contains("compact");
+    const mx = !st ? (compact ? 16 : 60) : compact ? 70 : 170, my = !st ? (compact ? 16 : 40) : compact ? 60 : 90;   // room for labels around the points
+    const fw = Math.max(80, w - 2 * mx), fh = Math.max(80, h - 2 * my);
+    const ppu1 = w / (camera.right - camera.left);
+    let z = Math.max(controls.minZoom, Math.min(1.8, fw / (Math.max(x1 - x0, 1) * ppu1), fh / (Math.max(y1 - y0, 1) * ppu1)) * Math.pow(0.85, shrink));
+    const C = R.clone().multiplyScalar((x0 + x1) / 2).addScaledVector(U, (y0 + y1) / 2).addScaledVector(F, fz);
+    // try the final view without showing it; zoom out (up to 3 times) until the step's marker and labels have clean spots
+    const saveT = controls.target.clone(), saveP = camera.position.clone(), saveZ = camera.zoom, off = saveP.clone().sub(saveT);
+    const tries = st ? 4 : 10;   // the overview may zoom out further: every label has to fit
+    let fits = false;
+    for (let k = 0; k < tries; k++) {
+      camera.position.copy(C).add(off); camera.zoom = z; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+      fits = !layout(true);
+      if (fits || z <= controls.minZoom + 1e-3 || k === tries - 1) break;
+      z = Math.max(controls.minZoom, z * 0.9); shrink++;
+    }
+    window.lastPlan = { fits, z };
+    if (instant) {   // jump (first load, "回到全圖", resize)
+      focus = null; controls.target.copy(C); camera.position.copy(C).add(off); camera.zoom = z; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+      window.relayout(true); return;
+    }
+    camera.position.copy(saveP); camera.zoom = saveZ; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    focusTo(C.toArray(), z);
+  };
+  // if a label of the current step still could not find a clean spot, zoom out a little and try again (at most 3 times)
+  window.checkMust = () => {
+    if (!window.layoutMustFail || cur < 0 || focus || userMoved || shrink >= 3) return;
+    if (camera.zoom <= controls.minZoom + 1e-3) { shrink = 3; return; }   // already as far out as allowed
+    shrink++; window.frameStep(STEPS[cur], true);
+  };
+  // "回到全圖": back to the overview, no step selected
+  // The default view must show every label (names, NICs, IPs). Keep the original angle when everything fits;
+  // otherwise (a narrow phone screen) try turning the scene around the vertical axis and take the angle that fits
+  // every label with the largest scene.
+  const ANGLES = [0, -30, 30, -60, 60, -90, 90, -120, 120];
+  const Y = new THREE.Vector3(0, 1, 0);
+  const poseAt = (deg) => {
+    const dir = DIR.clone().applyAxisAngle(Y, deg * Math.PI / 180);
+    controls.target.copy(T0); camera.position.copy(T0).addScaledVector(dir, 120); camera.lookAt(T0);
+    camera.zoom = 1; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+    window.frameStep(null, false, true);
+    return window.lastPlan;
+  };
+  let overviewAngle = null, overviewKey = "";
+  window.frameOverview = () => {
+    const key = vp.clientWidth + "x" + vp.clientHeight;
+    if (stage.classList.contains("compact")) { overviewAngle = 0; overviewKey = key; poseAt(0); return; }   // phones: original angle, list below
+    if (overviewAngle === null || key !== overviewKey) {   // choose the angle once per screen size
+      overviewKey = key; let best = null;
+      for (const deg of ANGLES) {
+        const r = poseAt(deg);
+        if (r.fits && (!best || r.z > best.z + 0.05)) best = { deg, z: r.z };
+        if (r.fits && deg === 0) break;   // the original angle works: keep it
+      }
+      overviewAngle = best ? best.deg : 0;
+    }
+    poseAt(overviewAngle);
+  };
+  window.resetAll = () => {
+    focus = null; anim = null; packet.visible = false; shrink = 0; userMoved = false;
+    window.frameOverview();
+    const damp = controls.enableDamping; controls.enableDamping = false; controls.update(); controls.enableDamping = damp;   // drop leftover momentum
+  };
+  window.frameOverview();   // the default view
+
+  let anim = null;  // packet animation along a polyline
+  window.onReduce = () => {
+    controls.enableDamping = !reduce;
+    if (!reduce) return;
+    if (focus) { const d = focus.to.clone().sub(controls.target); controls.target.add(d); camera.position.add(d); camera.zoom = focus.z1; camera.updateProjectionMatrix(); focus = null; }
+    if (anim) { packet.position.copy(anim.pts[anim.pts.length - 1]); packetHalo.scale.setScalar(1); anim = null; }
+  };
+  window.runPacket = (st) => {
+    if (!st.seg) { packet.visible = false; anim = null; return; }   // ARP: not a packet of connection ①
+    const pts = D[st.seg[0]].slice(st.seg[1], st.seg[2] + 1).map((p) => new THREE.Vector3(...p));
+    packet.material.color.set(COL[st.c]); packetHalo.material.color.set(COL[st.c]);
+    packet.visible = true;
+    packetHalo.scale.setScalar(1);
+    if (pts.length < 2 || reduce) { packet.position.copy(pts[pts.length - 1]); anim = reduce ? null : { pulse: true, t: 0, pts }; return; }
+    const lens = pts.slice(1).map((p, i) => p.distanceTo(pts[i])); const total = lens.reduce((a, b) => a + b, 0);
+    // during autoplay the packet stops at the end and waits for the next step; a step picked by hand loops
+    anim = { pts, lens, total, t: 0, dur: Math.max(1.2, total / 9), hold: playing };
+  };
+
+  const clock = new THREE.Clock();
+  (function loop() {
+    requestAnimationFrame(loop);
+    const dt = Math.min(clock.getDelta(), 0.05);
+    if (stage.hidden || document.hidden) return;
+    if (focus) {
+      focus.t = Math.min(1, focus.t + dt / (reduce ? 0.01 : 0.7)); const k = 1 - Math.pow(1 - focus.t, 3);
+      const nt = focus.from.clone().lerp(focus.to, k); const d = nt.clone().sub(controls.target);
+      controls.target.add(d); camera.position.add(d);
+      camera.zoom = focus.z0 + (focus.z1 - focus.z0) * k; camera.updateProjectionMatrix();
+      if (focus.t >= 1) { focus = null; layoutKey = ""; }   // lay out once more when the camera has settled
+    }
+    if (anim) {
+      anim.t += dt;
+      if (anim.pulse) { const s = 1 + 0.35 * Math.sin(anim.t * 5); packetHalo.scale.setScalar(s); }
+      else {
+        let f = Math.min(1, anim.t / anim.dur) * anim.total, i = 0;
+        while (i < anim.lens.length - 1 && f > anim.lens[i]) { f -= anim.lens[i]; i++; }
+        packet.position.copy(anim.pts[i]).lerp(anim.pts[i + 1], Math.min(1, f / anim.lens[i]));
+        packetHalo.scale.setScalar(1 + 0.15 * Math.sin(anim.t * 8));
+        if (anim.t > anim.dur + 0.6 && !anim.hold) { anim.t = 0; }   // loop the segment
+      }
+    }
+    controls.update(); renderer.render(scene, camera);
+    camera.updateMatrixWorld();
+    const key = camera.matrixWorld.elements.map((v) => v.toFixed(3)).join() + camera.zoom.toFixed(4) + vp.clientWidth + "x" + vp.clientHeight + cur;
+    if (key !== layoutKey) { layoutKey = key; layout(); window.checkMust(); }
+  })();
+}
+
+// ---------- step selection ----------
+function go(i, user) {
+  if (user) stopPlay();
+  cur = (i + STEPS.length) % STEPS.length;
+  const st = STEPS[cur];
+  list.querySelectorAll("button").forEach((b) => b.removeAttribute("aria-current"));
+  list.querySelectorAll("button")[cur].setAttribute("aria-current", "step");
+  const cap = document.getElementById("cap"); cap.style.setProperty("--c", COL[st.c]);
+  document.getElementById("cn").textContent = cur + 1;
+  document.getElementById("ct").innerHTML = `<b>${st.t}</b><span>${st.s}</span>`;
+  document.getElementById("live").textContent = `步驟 ${cur + 1}：${st.t}。${st.s}`;
+  markers.forEach((m, j) => { m.classList.toggle("on", j === cur); m.classList.toggle("dim", j !== cur); });
+  if (window.runPacket) { runPacket(st); frameStep(st); relayout(true); }
+}
+const START = `<b>點 › 或「播放」開始</b><span>拖曳可旋轉，滾輪或雙指縮放</span>`;
+function backToOverview() {
+  stopPlay(); cur = -1;
+  list.querySelectorAll("button").forEach((b) => b.removeAttribute("aria-current"));
+  markers.forEach((m) => m.classList.remove("on", "dim"));
+  document.getElementById("cap").style.removeProperty("--c");
+  document.getElementById("cn").textContent = "·";
+  document.getElementById("ct").innerHTML = START;
+  document.getElementById("live").textContent = "回到全圖";
+  if (window.resetAll) { resetAll(); relayout(true); }
+}
+document.getElementById("reset").addEventListener("click", backToOverview);
+const playBtn = document.getElementById("play"), cplayBtn = document.getElementById("cplay");
+function setPlayLabels() {
+  playBtn.textContent = playing ? "停止" : "播放全部";
+  cplayBtn.textContent = playing ? "停止" : "播放";
+}
+function stopPlay() { playing = false; clearTimeout(playTimer); setPlayLabels(); }
+function segLen(st) {
+  if (!st.seg) return 0; const p = D[st.seg[0]]; let L = 0;
+  for (let k = st.seg[1]; k < st.seg[2]; k++) L += Math.hypot(...p[k + 1].map((v, j) => v - p[k][j]));
+  return L;
+}
+function playFrom(i) {
+  go(i, false);
+  const run = segLen(STEPS[cur]) ? Math.max(1.2, segLen(STEPS[cur]) / 9) * 1000 : 0;   // same speed as runPacket
+  playTimer = setTimeout(() => { if (!playing) return; if (cur < STEPS.length - 1) playFrom(cur + 1); else stopPlay(); }, reduce ? 4000 : Math.max(3200, run + 1400));
+}
+function togglePlay() {
+  if (playing) return stopPlay();
+  playing = true; setPlayLabels(); playFrom(cur >= 0 && cur < STEPS.length - 1 ? cur : 0);
+}
+list.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) go(+b.dataset.i, true); });
+document.getElementById("prev").addEventListener("click", () => go(cur < 0 ? 0 : cur - 1, true));
+document.getElementById("next").addEventListener("click", () => go(cur + 1, true));
+playBtn.addEventListener("click", togglePlay);
+cplayBtn.addEventListener("click", togglePlay);
+
+document.getElementById("cprev").addEventListener("click", () => go(cur < 0 ? 0 : cur - 1, true));
+document.getElementById("cnext").addEventListener("click", () => go(cur + 1, true));
+
+// ---------- full screen: real fullscreen where allowed, otherwise fill the window ----------
+const fullBtn = document.getElementById("full");
+const isFull = () => document.fullscreenElement === stage || stage.classList.contains("max");
+function syncFull() {
+  requestAnimationFrame(() => window.fitStage?.());   // fit() also reframes the current step
+  const on = isFull();
+  fullBtn.setAttribute("aria-pressed", String(on)); fullBtn.textContent = on ? "結束全螢幕" : "全螢幕";
+  document.body.style.overflow = stage.classList.contains("max") ? "hidden" : "";
+}
+fullBtn.addEventListener("click", async () => {
+  if (isFull()) {
+    stage.classList.remove("max");
+    if (document.fullscreenElement) { try { await document.exitFullscreen(); } catch (e) {} }
+  } else {
+    try { if (!stage.requestFullscreen) throw 0; await stage.requestFullscreen(); }
+    catch (e) { stage.classList.add("max"); }
+  }
+  syncFull();
+});
+document.addEventListener("fullscreenchange", syncFull);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && stage.classList.contains("max")) { stage.classList.remove("max"); syncFull(); } });
+
+// ---------- 3D / flat toggle ----------
+const v3 = document.getElementById("v3"), v2 = document.getElementById("v2");
+function view(flat) {
+  if (flat && isFull()) { stage.classList.remove("max"); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); syncFull(); }
+  stage.hidden = flat; document.getElementById("flat").hidden = !flat;
+  if (!flat) requestAnimationFrame(() => window.fitStage?.());
+  document.getElementById("mhint").hidden = flat; document.getElementById("note").hidden = flat;
+  if (flat) document.getElementById("parts").hidden = true;
+  v3.setAttribute("aria-pressed", String(!flat)); v2.setAttribute("aria-pressed", String(flat));
+}
+v3.addEventListener("click", () => view(false)); v2.addEventListener("click", () => view(true));
+</script>
